@@ -476,6 +476,115 @@
     .result-stats { grid-template-columns: 1fr 1fr; gap: 8px; }
     .stat-value { font-size: 1.2rem; }
   }
+
+  /* ===== 语音按钮样式 ===== */
+  .voice-btn {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    margin-left: 8px;
+    vertical-align: middle;
+    transition: transform 0.2s ease, opacity 0.2s ease;
+    opacity: 0.8;
+  }
+  
+  .voice-btn:hover {
+    transform: scale(1.2);
+    opacity: 1;
+  }
+  
+  .voice-btn:active {
+    transform: scale(0.9);
+  }
+  
+  .voice-btn.speaking {
+    animation: pulse-voice 1s infinite;
+  }
+  
+  @keyframes pulse-voice {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.15); }
+  }
+  
+  .voice-btn.listening {
+    animation: pulse-mic 0.8s infinite;
+  }
+  
+  @keyframes pulse-mic {
+    0%, 100% { transform: scale(1); opacity: 0.8; }
+    50% { transform: scale(1.2); opacity: 1; }
+  }
+  
+  .voice-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+  
+  /* 场景文本容器 */
+  .scene-text-wrapper {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  
+  .scene-text-wrapper .scene-text {
+    flex: 1;
+    margin-bottom: 0;
+  }
+  
+  /* 选项容器 */
+  .choice-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  
+  .choice-wrapper .choice-btn {
+    flex: 1;
+  }
+  
+  /* 反馈文本容器 */
+  .feedback-en-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  
+  .feedback-en-wrapper .feedback-en {
+    margin-bottom: 0;
+  }
+  
+  /* 语音提示 */
+  .voice-hint {
+    font-size: 0.75rem;
+    color: var(--text-light);
+    margin-top: 4px;
+    display: none;
+  }
+  
+  .voice-hint.show {
+    display: block;
+  }
+  
+  /* 麦克风不支持时的隐藏类 */
+  .mic-only {
+    display: inline;
+  }
+  
+  .mic-unsupported {
+    display: none !important;
+  }
+  
+  /* 反馈区域的朗读按钮 */
+  .feedback-box .voice-btn {
+    background: rgba(255,255,255,0.5);
+    border-radius: 50%;
+    padding: 6px 10px;
+  }
+
 </style>
 </head>
 <body>
@@ -566,6 +675,10 @@ function showScreen(id) {
 // ====== START / RESTART ======
 function startGame() {
   initState();
+  // 初始化语音识别
+  if (SpeechRecognitionSupport && !recognition) {
+    initSpeechRecognition();
+  }
   showScreen('game-screen');
   loadScene(0);
 }
@@ -664,15 +777,40 @@ function loadScene(index) {
     choicesHTML += '<button class="choice-btn" data-index="' + i + '" onclick="handleChoice(' + i + ')">' + scene.choices[i].text + '</button>';
   }
 
+  // 添加语音按钮到选项
+  var choicesWithMicHTML = '';
+  for (var i = 0; i < scene.choices.length; i++) {
+    var micBtn = '';
+    if (SpeechRecognitionSupport) {
+      micBtn = '<button class="voice-btn mic-btn" onclick="startListening(' + i + ')" title="说出选项内容自动选择">🎤</button>';
+    }
+    choicesWithMicHTML += '<div class="choice-wrapper">' + 
+      '<button class="choice-btn" data-index="' + i + '" onclick="handleChoice(' + i + ')">' + scene.choices[i].text + '</button>' +
+      micBtn +
+      '</div>';
+  }
+  
+  // 场景文本的朗读按钮
+  var sceneSpeakBtn = '';
+  if (SpeechSynthesisSupport) {
+    sceneSpeakBtn = '<button id="scene-speak-btn" class="voice-btn" onclick="speakSceneText()" title="朗读对话内容">🔊</button>';
+  }
+  
   area.innerHTML =
     '<img class="scene-image" src="' + imgSrc + '" alt="Scene">' +
     '<div class="scene-title">' + scene.title + '</div>' +
-    '<div class="scene-text">' + scene.text + '</div>' +
+    '<div class="scene-text-wrapper">' +
+      '<div class="scene-text">' + scene.text + '</div>' +
+      sceneSpeakBtn +
+    '</div>' +
     '<div class="scene-tip">' + scene.tip + '</div>' +
-    '<div class="choices" id="choices-area">' + choicesHTML + '</div>' +
+    '<div class="choices" id="choices-area">' + choicesWithMicHTML + '</div>' +
     '<div id="feedback-area"></div>' +
     '<button class="btn-next" id="btn-next" onclick="nextScene()">Next \u2192</button>';
 
+  // 更新麦克风按钮可见性
+  updateMicButtonVisibility();
+  
   startTimer();
 }
 
@@ -808,10 +946,26 @@ function updateComboLabel() {
 function showFeedback(isCorrect, enText, cnText, correctAnswer) {
   var area = document.getElementById('feedback-area');
   var cls = isCorrect ? 'correct' : 'wrong';
+  
+  // 添加朗读按钮
+  var speakBtn = '';
+  if (SpeechSynthesisSupport) {
+    speakBtn = '<button class="voice-btn" onclick="speakFeedback(\'' + enText.replace(/'/g, "\\'") + '\')" title="朗读反馈">🔊</button>';
+  }
+  
   var html = '<div class="feedback-box ' + cls + '">';
+  html += '<div class="feedback-en-wrapper">';
   html += '<div class="feedback-en">' + enText + '</div>';
+  html += speakBtn;
+  html += '</div>';
   if (cnText) html += '<div class="feedback-cn">\uD83D\uDCCD ' + cnText + '</div>';
-  if (correctAnswer) html += '<div class="feedback-cn">\u2705 \u6B63\u786E\u7B54\u6848: ' + correctAnswer + '</div>';
+  if (correctAnswer) {
+    var speakCorrectBtn = '';
+    if (SpeechSynthesisSupport) {
+      speakCorrectBtn = '<button class="voice-btn" onclick="speakFeedback(\'' + correctAnswer.replace(/'/g, "\\'") + '\')" title="朗读正确答案">🔊</button>';
+    }
+    html += '<div class="feedback-cn">\u2705 \u6B63\u786E\u7B54\u6848: ' + correctAnswer + ' ' + speakCorrectBtn + '</div>';
+  }
   html += '</div>';
   area.innerHTML = html;
 }
@@ -944,6 +1098,232 @@ function showResults() {
 
 // ====== INIT ======
 initState();
+
+// ====== 语音功能检测 ======
+var SpeechSynthesisSupport = 'speechSynthesis' in window;
+var SpeechRecognitionSupport = 'SpeechRecognition' in window || 'webkitSpeechRecognition' in window;
+
+// 获取语音识别API
+var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+// ====== TTS 朗读功能 ======
+function speakText(text, button) {
+  if (!SpeechSynthesisSupport) {
+    console.log('TTS not supported');
+    return;
+  }
+  
+  // 停止之前的朗读
+  window.speechSynthesis.cancel();
+  
+  var utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = 'en-US';
+  utterance.rate = 0.85;  // 语速放慢，适合A1学生
+  utterance.pitch = 1;
+  utterance.volume = 1;
+  
+  // 如果有按钮，添加样式
+  if (button) {
+    button.classList.add('speaking');
+  }
+  
+  utterance.onend = function() {
+    if (button) {
+      button.classList.remove('speaking');
+    }
+  };
+  
+  utterance.onerror = function(e) {
+    if (button) {
+      button.classList.remove('speaking');
+    }
+    console.log('TTS error:', e);
+  };
+  
+  window.speechSynthesis.speak(utterance);
+}
+
+// 停止朗读
+function stopSpeaking() {
+  if (SpeechSynthesisSupport) {
+    window.speechSynthesis.cancel();
+  }
+}
+
+// ====== 语音识别功能 ======
+var recognition = null;
+var isListening = false;
+
+function initSpeechRecognition() {
+  if (!SpeechRecognitionSupport) {
+    console.log('SpeechRecognition not supported');
+    return null;
+  }
+  
+  recognition = new SpeechRecognition();
+  recognition.continuous = false;
+  recognition.interimResults = false;
+  recognition.lang = 'en-US';
+  
+  recognition.onstart = function() {
+    isListening = true;
+    updateMicButtons(true);
+  };
+  
+  recognition.onend = function() {
+    isListening = false;
+    updateMicButtons(false);
+  };
+  
+  recognition.onerror = function(event) {
+    isListening = false;
+    updateMicButtons(false);
+    console.log('Speech recognition error:', event.error);
+  };
+  
+  recognition.onresult = function(event) {
+    var transcript = event.results[0][0].transcript.toLowerCase().trim();
+    console.log('Recognized:', transcript);
+    handleRecognizedText(transcript);
+  };
+  
+  return recognition;
+}
+
+// 更新所有麦克风按钮状态
+function updateMicButtons(listening) {
+  var micBtns = document.querySelectorAll('.mic-btn');
+  micBtns.forEach(function(btn) {
+    if (listening) {
+      btn.classList.add('listening');
+      btn.textContent = '🎤';
+    } else {
+      btn.classList.remove('listening');
+      btn.textContent = '🎤';
+    }
+  });
+}
+
+// 处理识别结果
+function handleRecognizedText(transcript) {
+  var scene = SCENES[state.currentSceneIndex];
+  if (!scene) return;
+  
+  // 清理识别的文本，移除标点，转换为小写
+  var cleanTranscript = transcript.replace(/[.,!?;:'"()-]/g, '').toLowerCase().trim();
+  
+  console.log('Matching against choices with clean text:', cleanTranscript);
+  
+  // 模糊匹配选项
+  for (var i = 0; i < scene.choices.length; i++) {
+    var choiceText = scene.choices[i].text.toLowerCase().trim();
+    // 移除括号内容进行比较
+    var cleanChoice = choiceText.replace(/\([^)]*\)/g, '').replace(/[.,!?;:'"()-]/g, '').trim();
+    
+    // 计算相似度
+    var similarity = calculateSimilarity(cleanTranscript, cleanChoice);
+    console.log('Choice ' + i + ': "' + cleanChoice + '" - Similarity: ' + similarity);
+    
+    if (similarity > 0.6) {  // 60%以上相似度
+      // 找到对应的按钮并高亮
+      var buttons = document.querySelectorAll('.choice-btn');
+      if (buttons[i] && !buttons[i].classList.contains('disabled')) {
+        // 自动选择该选项
+        setTimeout(function(idx) {
+          handleChoice(idx);
+        }, 300);
+        break;
+      }
+    }
+  }
+}
+
+// 计算两个字符串的相似度
+function calculateSimilarity(str1, str2) {
+  str1 = str1.toLowerCase().trim();
+  str2 = str2.toLowerCase().trim();
+  
+  // 完全匹配
+  if (str1 === str2) return 1;
+  
+  // 包含关系
+  if (str1.includes(str2) || str2.includes(str1)) {
+    return Math.min(str1.length, str2.length) / Math.max(str1.length, str2.length);
+  }
+  
+  // 词级别匹配
+  var words1 = str1.split(/\s+/);
+  var words2 = str2.split(/\s+/);
+  
+  var matchCount = 0;
+  for (var i = 0; i < words1.length; i++) {
+    for (var j = 0; j < words2.length; j++) {
+      if (words1[i] === words2[j]) {
+        matchCount++;
+        break;
+      }
+    }
+  }
+  
+  var maxWords = Math.max(words1.length, words2.length);
+  return matchCount / maxWords;
+}
+
+// 开始语音识别
+function startListening(choiceIndex) {
+  if (!SpeechRecognitionSupport || isListening) {
+    return;
+  }
+  
+  if (!recognition) {
+    recognition = initSpeechRecognition();
+  }
+  
+  if (recognition) {
+    try {
+      recognition.start();
+    } catch (e) {
+      console.log('Recognition start error:', e);
+    }
+  }
+}
+
+// ====== 更新界面显示麦克风按钮 ======
+function updateMicButtonVisibility() {
+  var micBtns = document.querySelectorAll('.mic-btn');
+  if (SpeechRecognitionSupport) {
+    micBtns.forEach(function(btn) {
+      btn.classList.remove('mic-unsupported');
+    });
+  } else {
+    micBtns.forEach(function(btn) {
+      btn.classList.add('mic-unsupported');
+    });
+  }
+}
+
+// ====== 朗读场景对话 ======
+function speakSceneText() {
+  var scene = SCENES[state.currentSceneIndex];
+  if (scene && scene.text) {
+    // 提取英文部分（去掉括号中的中文）
+    var englishText = scene.text.replace(/\([^)]*\)/g, '').trim();
+    speakText(englishText, document.getElementById('scene-speak-btn'));
+  }
+}
+
+// ====== 朗读反馈 ======
+function speakFeedback(feedbackText) {
+  if (feedbackText) {
+    // 提取英文部分
+    var englishText = feedbackText.replace(/[\u4e00-\u9fa5]/g, '').trim();
+    englishText = englishText.replace(/✅|❌|🎉|👏|🌟|💪|✨|🚀/g, '').trim();
+    if (englishText) {
+      speakText(englishText, null);
+    }
+  }
+}
+
 </script>
 </body>
 </html>
